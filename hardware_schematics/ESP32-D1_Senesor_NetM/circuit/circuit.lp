@@ -1,0 +1,12 @@
+(librepcb_circuit
+ (variant 8bbe4343-f1be-4c67-a974-61fae091829a (name "Std")
+  (description "Standard assembly")
+ )
+ (netclass 27f119f9-bb0e-4b42-a10a-eb12526b1d3d (name "default")
+  (default_trace_width inherit)
+  (default_via_drill_diameter inherit)
+  (min_copper_copper_clearance 0.0)
+  (min_copper_width 0.0)
+  (min_via_drill_diameter 0.0)
+ )
+)
