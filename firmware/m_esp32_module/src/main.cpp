@@ -8,12 +8,12 @@
 #include "esp_err.h"
 #include "esp_adc/adc_oneshot.h"
 
-#define LDR_CHANNEL    ADC_CHANNEL_7  // GPIO35
-#define ADC_SAMPLES_LDR    16
-#define READ_INTERVAL  1000           // ms
+constexpr adc_channel_t LDR_CHANNEL = ADC_CHANNEL_7; // GPIO35
+constexpr int ADC_SAMPLES_LDR = 16;
+constexpr uint32_t READ_INTERVAL = 1000; // ms
 
-#define LDR_TASK_PRIORITY  5
-#define LDR_TASK_STACK     4096
+const constexpr UBaseType_t LDR_TASK_PRIORITY = 5;
+const constexpr uint16_t LDR_TASK_STACK = 4096;
 
 static const char *TAG = "LDR";
 static adc_oneshot_unit_handle_t adc_handle = nullptr;
@@ -89,28 +89,319 @@ void LDR_Task(void *pvParameters)
     }
 }
 
-void BMP280_Task(void *pvParameters) {
-
-    while (true)
-    {
-        
-        
-
-    }
-    
-
-}
-
 // ######################################################## //
 //                      LDR-READING                         //
 // ######################################################## //
+
+
+
+#include <cstdint>
+#include <cstddef>
+#include <cstdlib>
+#include "driver/i2c_master.h"
+
+// BMP280 configuration;
+constexpr gpio_num_t BMP280_SCL = GPIO_NUM_21;
+constexpr gpio_num_t BMP280_SDA = GPIO_NUM_22;
+constexpr uint16_t BMP280_ADDR = 0x76;
+
+constexpr int BMP280_SAMPLES = 16;
+constexpr uint32_t BMP280_INTERVAL_MS = 1000;
+constexpr UBaseType_t BMP280_PRIORITY = 15;
+constexpr uint32_t BMP280_STACK = 4096;
+
+// BMP280 registers;
+constexpr uint8_t BMP280_REG_ID    = 0xD0;
+constexpr uint8_t BMP280_REG_CTRL  = 0xF4;
+constexpr uint8_t BMP280_REG_DATA  = 0xF7;
+constexpr uint8_t BMP280_REG_CALIB = 0x88;
+
+// BMP280 configuration values;
+constexpr uint8_t BMP280_CHIP_ID = 0x58;
+constexpr uint8_t BMP280_CTRL_FORCED_X16 = 0xB5;
+
+constexpr uint32_t BMP280_CONVERSION_MS = 90;
+constexpr uint32_t BMP280_I2C_TIMEOUT_MS = 1000;
+constexpr uint32_t BMP280_I2C_FREQ_HZ = 100000;
+
+static const char *BMP_TAG = "BMP280";
+
+static i2c_master_bus_handle_t bmp_bus = nullptr;
+static i2c_master_dev_handle_t bmp_dev = nullptr;
+
+// Coeficienti de calibratie;
+struct BMP280_Calibration {
+    uint16_t T1;
+    int16_t T2, T3;
+    uint16_t P1;
+    int16_t P2, P3, P4, P5;
+    int16_t P6, P7, P8, P9;
+};
+
+static BMP280_Calibration cal = {};
+
+// citim registri BMP280;
+esp_err_t BMP280_ReadReg(uint8_t reg, uint8_t *data, size_t length)
+{
+    return i2c_master_transmit_receive(
+        bmp_dev,
+        &reg,
+        1,
+        data,
+        length,
+        BMP280_I2C_TIMEOUT_MS
+    );
+}
+
+// Scriem registri BMP280;
+esp_err_t BMP280_WriteReg(uint8_t reg, uint8_t value)
+{
+    uint8_t data[2] = {reg, value};
+
+    return i2c_master_transmit(
+        bmp_dev,
+        data,
+        sizeof(data),
+        BMP280_I2C_TIMEOUT_MS
+    );
+}
+
+// Convertim biti de calibratie;
+uint16_t BMP280_U16(const uint8_t *p)
+{
+    return static_cast<uint16_t>(static_cast<uint16_t>(p[0]) | (static_cast<uint16_t>(p[1]) << 8));
+}
+
+int16_t BMP280_S16(const uint8_t *p)
+{
+    return static_cast<int16_t>(BMP280_U16(p));
+}
+
+// Initializare I2C si a BMP280;
+void BMP280_Init(void)
+{
+    i2c_master_bus_config_t bus_cfg = {};
+
+    bus_cfg.i2c_port = I2C_NUM_0;
+    bus_cfg.sda_io_num = BMP280_SDA;
+    bus_cfg.scl_io_num = BMP280_SCL;
+    bus_cfg.clk_source = I2C_CLK_SRC_DEFAULT;
+    bus_cfg.glitch_ignore_cnt = 7;
+
+    ESP_ERROR_CHECK(i2c_new_master_bus(
+        &bus_cfg, &bmp_bus
+    ));
+
+    i2c_device_config_t dev_cfg = {};
+
+    dev_cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+    dev_cfg.device_address = BMP280_ADDR;
+    dev_cfg.scl_speed_hz = BMP280_I2C_FREQ_HZ;
+
+    ESP_ERROR_CHECK(i2c_master_bus_add_device(
+        bmp_bus, &dev_cfg, &bmp_dev
+    ));
+
+    // Verificam senzor;
+    uint8_t id = 0;
+
+    ESP_ERROR_CHECK(BMP280_ReadReg(
+        BMP280_REG_ID, &id, 1
+    ));
+
+    if (id != BMP280_CHIP_ID) {
+        ESP_LOGE(BMP_TAG,
+                 "Invalid sensor ID: 0x%02X", id);
+        abort();
+    }
+
+    // Citim si calibram registrele;
+    uint8_t b[24] = {};
+
+    ESP_ERROR_CHECK(BMP280_ReadReg(
+        BMP280_REG_CALIB, b, sizeof(b)
+    ));
+
+    cal.T1 = BMP280_U16(&b[0]);
+    cal.T2 = BMP280_S16(&b[2]);
+    cal.T3 = BMP280_S16(&b[4]);
+
+    cal.P1 = BMP280_U16(&b[6]);
+    cal.P2 = BMP280_S16(&b[8]);
+    cal.P3 = BMP280_S16(&b[10]);
+    cal.P4 = BMP280_S16(&b[12]);
+    cal.P5 = BMP280_S16(&b[14]);
+    cal.P6 = BMP280_S16(&b[16]);
+    cal.P7 = BMP280_S16(&b[18]);
+    cal.P8 = BMP280_S16(&b[20]);
+    cal.P9 = BMP280_S16(&b[22]);
+
+    if (cal.P1 == 0) {
+        ESP_LOGE(BMP_TAG, "Invalid calibration");
+        abort();
+    }
+
+    ESP_LOGI(BMP_TAG, "BMP280 initialized on SDA=22 SCL=21");
+}
+
+// Read one compensated measurement;
+esp_err_t BMP280_Read(float *temperature, float *pressure)
+{
+    if (temperature == nullptr || pressure == nullptr)
+        return ESP_ERR_INVALID_ARG;
+
+    // Temperature x16, pressure x16, in mod fortat;
+    // osrs_t=101, osrs_p=101, mode=01
+    esp_err_t err = BMP280_WriteReg(
+        BMP280_REG_CTRL,
+        BMP280_CTRL_FORCED_X16
+    );
+
+    if (err != ESP_OK)
+        return err;
+
+    // Lasam timp ca sa se termine conversia;
+    vTaskDelay(pdMS_TO_TICKS(BMP280_CONVERSION_MS));
+
+    uint8_t data[6] = {};
+
+    err = BMP280_ReadReg(
+        BMP280_REG_DATA, data, sizeof(data)
+    );
+
+    if (err != ESP_OK)
+        return err;
+
+    int32_t adc_P =
+        (static_cast<int32_t>(data[0]) << 12) |
+        (static_cast<int32_t>(data[1]) << 4) |
+        (data[2] >> 4);
+
+    int32_t adc_T =
+        (static_cast<int32_t>(data[3]) << 12) |
+        (static_cast<int32_t>(data[4]) << 4) |
+        (data[5] >> 4);
+
+    constexpr int32_t ADC_INVALID = 0x80000;
+
+    if (adc_T == ADC_INVALID || adc_P == ADC_INVALID)
+        return ESP_ERR_INVALID_RESPONSE;
+
+    // Compensatie a temperaturi, conofrm Bosch;
+    double v1 =(adc_T / 16384.0 - cal.T1 / 1024.0) * cal.T2;
+
+    double v2 = (adc_T / 131072.0 - cal.T1 / 8192.0);
+
+    v2 = v2 * v2 * cal.T3;
+
+    double t_fine = v1 + v2;
+
+    *temperature = static_cast<float>(t_fine / 5120.0);
+
+    // Compensare de presiune (Bosch)
+    v1 = t_fine / 2.0 - 64000.0;
+
+    v2 = v1 * v1 * cal.P6 / 32768.0;
+    v2 += v1 * cal.P5 * 2.0;
+    v2 = v2 / 4.0 + cal.P4 * 65536.0;
+
+    v1 = (cal.P3 * v1 * v1 / 524288.0 + cal.P2 * v1) / 524288.0;
+
+    v1 = (1.0 + v1 / 32768.0) * cal.P1;
+
+    if (v1 == 0.0)
+        return ESP_ERR_INVALID_STATE;
+
+    double p = 1048576.0 - adc_P;
+
+    p = (p - v2 / 4096.0) * 6250.0 / v1;
+
+    v1 = cal.P9 * p * p / 2147483648.0;
+    v2 = p * cal.P8 / 32768.0;
+
+    p += (v1 + v2 + cal.P7) / 16.0;
+
+    *pressure = static_cast<float>(p / 100.0); // hPa
+
+    return ESP_OK;
+}
+
+// Citeste de 16 ori si calculeaza mediile, 16 samples;
+esp_err_t BMP280_ReadAverage(float *temperature, float *pressure)
+{
+    if (temperature == nullptr || pressure == nullptr)
+        return ESP_ERR_INVALID_ARG;
+
+    double sum_T = 0.0;
+    double sum_P = 0.0;
+
+    for (int i = 0; i < BMP280_SAMPLES; i++)
+    {
+        float t = 0.0f;
+        float p = 0.0f;
+
+        esp_err_t err = BMP280_Read(&t, &p);
+
+        if (err != ESP_OK)
+            return err;
+
+        sum_T += t;
+        sum_P += p;
+    }
+
+    *temperature = static_cast<float>(
+        sum_T / BMP280_SAMPLES
+    );
+
+    *pressure = static_cast<float>(
+        sum_P / BMP280_SAMPLES
+    );
+
+    return ESP_OK;
+}
+
+// FreeRTOS task
+void BMP280_Task(void *pvParameters)
+{
+    (void)pvParameters;
+
+    while (true)
+    {
+        float temperature = 0.0f;
+        float pressure = 0.0f;
+
+        esp_err_t err = BMP280_ReadAverage(
+            &temperature, &pressure
+        );
+
+        if (err == ESP_OK)
+        {
+            ESP_LOGI(
+                BMP_TAG,
+                "Temperature: %.2f C | Pressure: %.2f hPa",
+                temperature,
+                pressure
+            );
+        }
+        else
+        {
+            ESP_LOGE(
+                BMP_TAG,
+                "Read failed: %s",
+                esp_err_to_name(err)
+            );
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(BMP280_INTERVAL_MS));
+    }
+}
 
 // Main entry point
 extern "C" void app_main(void)
 {
     LDR_Init();
-
-    xTaskCreate(LDR_Task,"LDR_Task", LDR_TASK_STACK, nullptr, LDR_TASK_PRIORITY, nullptr);
-    xTaskCreate(BMP280_Task, "BMP280_Task", 4096, nullptr, 15, nullptr);
+    BMP280_Init();
+    //xTaskCreate(LDR_Task,"LDR_Task", LDR_TASK_STACK, nullptr, LDR_TASK_PRIORITY, nullptr);
+    xTaskCreate(BMP280_Task, "BMP280_Task", 4096, nullptr, BMP280_PRIORITY, nullptr);
 
 }
