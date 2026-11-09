@@ -9,20 +9,19 @@
 #include "esp_adc/adc_oneshot.h"
 
 #define LDR_CHANNEL    ADC_CHANNEL_7  // GPIO35
-#define ADC_SAMPLES    16
+#define ADC_SAMPLES_LDR    16
 #define READ_INTERVAL  1000           // ms
 
 #define LDR_TASK_PRIORITY  5
 #define LDR_TASK_STACK     4096
 
 static const char *TAG = "LDR";
-
 static adc_oneshot_unit_handle_t adc_handle = nullptr;
-
 
 // ######################################################## //
 //                      LDR-READING                         //
 // ######################################################## //
+
 // Initialize ADC1 on GPIO35
 void LDR_Init(void)
 {
@@ -57,7 +56,7 @@ int LDR_Read(void)
     int32_t sum = 0;
 
     // Face 16 samples;
-    for (int i = 0; i < ADC_SAMPLES; i++)
+    for (int i = 0; i < ADC_SAMPLES_LDR; i++)
     {
         int raw = 0;
 
@@ -71,7 +70,7 @@ int LDR_Read(void)
     }
 
     // media aritmetica, 16 citiri adunate / nr de samples;
-    return sum / ADC_SAMPLES;
+    return sum / ADC_SAMPLES_LDR;
 }
 
 // FreeRTOS LDR task
@@ -100,5 +99,6 @@ extern "C" void app_main(void)
     LDR_Init();
 
     xTaskCreate(LDR_Task,"LDR_Task", LDR_TASK_STACK, nullptr, LDR_TASK_PRIORITY, nullptr);
+    xTaskCreate(BMP280_Task, "BMP280_Task", 4096, );
 
 }
