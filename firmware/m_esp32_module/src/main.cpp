@@ -89,6 +89,18 @@ void LDR_Task(void *pvParameters)
     }
 }
 
+void BMP280_Task(void *pvParameters) {
+
+    while (true)
+    {
+        
+        
+
+    }
+    
+
+}
+
 // ######################################################## //
 //                      LDR-READING                         //
 // ######################################################## //
@@ -99,6 +111,6 @@ extern "C" void app_main(void)
     LDR_Init();
 
     xTaskCreate(LDR_Task,"LDR_Task", LDR_TASK_STACK, nullptr, LDR_TASK_PRIORITY, nullptr);
-    xTaskCreate(BMP280_Task, "BMP280_Task", 4096, );
+    xTaskCreate(BMP280_Task, "BMP280_Task", 4096, nullptr, 15, nullptr);
 
 }
