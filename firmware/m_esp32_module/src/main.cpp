@@ -1,7 +1,9 @@
 
 #include <stdint.h>
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+
 #include "esp_log.h"
 #include "esp_err.h"
 #include "esp_adc/adc_oneshot.h"
@@ -12,24 +14,23 @@
 
 static const char *TAG = "LDR";
 
-void app_main(void)
+extern "C" void app_main(void)
 {
     // 1. Initializare ADC1
-    adc_oneshot_unit_handle_t adc_handle;
+    adc_oneshot_unit_handle_t adc_handle = nullptr;
 
-    adc_oneshot_unit_init_cfg_t unit_cfg = {
-        .unit_id = ADC_UNIT_1,
-    };
+    adc_oneshot_unit_init_cfg_t unit_cfg = {};
+    unit_cfg.unit_id = ADC_UNIT_1;
 
     ESP_ERROR_CHECK(adc_oneshot_new_unit(
-        &unit_cfg, &adc_handle
+        &unit_cfg,
+        &adc_handle
     ));
 
     // 2. Configurare GPIO35 (ADC1_CH7)
-    adc_oneshot_chan_cfg_t channel_cfg = {
-        .atten = ADC_ATTEN_DB_12,
-        .bitwidth = ADC_BITWIDTH_12,
-    };
+    adc_oneshot_chan_cfg_t channel_cfg = {};
+    channel_cfg.atten = ADC_ATTEN_DB_12;
+    channel_cfg.bitwidth = ADC_BITWIDTH_12;
 
     ESP_ERROR_CHECK(adc_oneshot_config_channel(
         adc_handle,
@@ -40,7 +41,7 @@ void app_main(void)
     ESP_LOGI(TAG, "LDR initialized on GPIO35");
 
     // 3. Citire periodica
-    while (1)
+    while (true)
     {
         int32_t sum = 0;
 
