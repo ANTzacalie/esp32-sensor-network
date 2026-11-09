@@ -401,6 +401,8 @@ extern "C" void app_main(void)
 {
     LDR_Init();
     BMP280_Init();
+
+    vTaskDelay(pdMS_TO_TICKS(3000));
     //xTaskCreate(LDR_Task,"LDR_Task", LDR_TASK_STACK, nullptr, LDR_TASK_PRIORITY, nullptr);
     xTaskCreate(BMP280_Task, "BMP280_Task", 4096, nullptr, BMP280_PRIORITY, nullptr);
 
