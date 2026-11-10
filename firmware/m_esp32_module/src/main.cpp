@@ -699,6 +699,7 @@ void AHT20_Task(void *pvParameters)
 // Main entry point
 extern "C" void app_main(void)
 {
+    
     LDR_Init();
     BMP280_Init();
     AHT20_Init();
