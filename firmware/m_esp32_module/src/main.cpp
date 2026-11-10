@@ -487,6 +487,9 @@ constexpr uint32_t AHT20_I2C_TIMEOUT_MS = 1000;
 constexpr UBaseType_t AHT20_PRIORITY = 10;
 constexpr uint32_t AHT20_STACK = 4096;
 
+constexpr uint32_t AHT20_I2C_FREQ_HZ = 100000;
+constexpr uint8_t AHT20_STATUS_CALIBRATED = 0x08;
+
 static const char *AHT_TAG = "AHT20";
 static i2c_master_dev_handle_t aht_dev = nullptr;
 
