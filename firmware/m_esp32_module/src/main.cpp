@@ -395,14 +395,319 @@ void BMP280_Task(void *pvParameters)
     }
 }
 
+
+// ######################################################## //
+//                      SR602-READING                       //
+// ######################################################## //
+
+#include "driver/gpio.h"
+
+constexpr gpio_num_t SR602_PIN = GPIO_NUM_27;
+
+constexpr uint32_t SR602_INTERVAL_MS = 100;
+constexpr UBaseType_t SR602_PRIORITY = 8;
+constexpr uint32_t SR602_STACK = 2048;
+
+static const char *SR602_TAG = "SR602";
+
+// Initializare GPIO27 ca intrare digitala
+void SR602_Init(void)
+{
+    gpio_config_t io_cfg = {};
+
+    io_cfg.pin_bit_mask = (1ULL << SR602_PIN);
+    io_cfg.mode = GPIO_MODE_INPUT;
+    io_cfg.pull_up_en = GPIO_PULLUP_DISABLE;
+    io_cfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    io_cfg.intr_type = GPIO_INTR_DISABLE;
+
+    ESP_ERROR_CHECK(gpio_config(&io_cfg));
+
+    ESP_LOGI(SR602_TAG, "SR602 initialized on GPIO27");
+}
+
+// Citire stare digitala
+int SR602_Read(void)
+{
+    return gpio_get_level(SR602_PIN);
+}
+
+// FreeRTOS task pentru detectare miscare
+void SR602_Task(void *pvParameters)
+{
+    (void)pvParameters;
+
+    int previous_state = -1;
+
+    while (true)
+    {
+        int current_state = SR602_Read();
+
+        // Afisam doar la schimbarea starii
+        if (current_state != previous_state)
+        {
+            if (current_state == 1)
+            {
+                ESP_LOGI(
+                    SR602_TAG,
+                    "Motion detected!"
+                );
+            }
+            else
+            {
+                ESP_LOGI(
+                    SR602_TAG,
+                    "No motion"
+                );
+            }
+
+            previous_state = current_state;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(SR602_INTERVAL_MS));
+    }
+}
+
+// ######################################################## //
+//                      SR602-READING                       //
+// ######################################################## //
+
+
+ // ######################################################## //
+ //                      AHT20-READING                       //
+ // ######################################################## //
+
+constexpr uint16_t AHT20_ADDR = 0x38;
+constexpr int AHT20_SAMPLES = 16;
+
+constexpr uint32_t AHT20_INTERVAL_MS = 1000;
+constexpr uint32_t AHT20_CONVERSION_MS = 85;
+constexpr uint32_t AHT20_I2C_TIMEOUT_MS = 1000;
+
+constexpr UBaseType_t AHT20_PRIORITY = 10;
+constexpr uint32_t AHT20_STACK = 4096;
+
+static const char *AHT_TAG = "AHT20";
+static i2c_master_dev_handle_t aht_dev = nullptr;
+
+// Calcul CRC-8 pentru verificarea datelor
+uint8_t AHT20_CRC8(const uint8_t *data, size_t length)
+{
+    uint8_t crc = 0xFF;
+
+    for (size_t i = 0; i < length; i++)
+    {
+        crc ^= data[i];
+
+        for (int bit = 0; bit < 8; bit++)
+        {
+            if (crc & 0x80)
+                crc = static_cast<uint8_t>((crc << 1) ^ 0x31);
+            else
+                crc = static_cast<uint8_t>(crc << 1);
+        }
+    }
+
+    return crc;
+}
+
+// Initializare AHT20 pe aceeasi magistrala cu BMP280
+void AHT20_Init(void)
+{
+    // Magistrala bmp_bus trebuie deja initializata
+    if (bmp_bus == nullptr)
+    {
+        ESP_LOGE(AHT_TAG, "I2C bus not initialized");
+        abort();
+    }
+
+    i2c_device_config_t dev_cfg = {};
+
+    dev_cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+    dev_cfg.device_address = AHT20_ADDR;
+    dev_cfg.scl_speed_hz = BMP280_I2C_FREQ_HZ;
+
+    ESP_ERROR_CHECK(i2c_master_bus_add_device(
+        bmp_bus,
+        &dev_cfg,
+        &aht_dev
+    ));
+
+    // Timp de stabilizare dupa alimentare
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    // Citim registrul de status
+    uint8_t status = 0;
+
+    ESP_ERROR_CHECK(i2c_master_receive(
+        aht_dev,
+        &status,
+        1,
+        AHT20_I2C_TIMEOUT_MS
+    ));
+
+    // Verificam bitul de calibrare (bit 3)
+    if ((status & 0x08) == 0)
+    {
+        uint8_t init_cmd[3] = {0xBE, 0x08, 0x00};
+
+        ESP_ERROR_CHECK(i2c_master_transmit(
+            aht_dev,
+            init_cmd,
+            sizeof(init_cmd),
+            AHT20_I2C_TIMEOUT_MS
+        ));
+
+        vTaskDelay(pdMS_TO_TICKS(20));
+
+        ESP_ERROR_CHECK(i2c_master_receive(
+            aht_dev,
+            &status,
+            1,
+            AHT20_I2C_TIMEOUT_MS
+        ));
+
+        if ((status & 0x08) == 0)
+        {
+            ESP_LOGE(AHT_TAG, "Calibration not enabled");
+            abort();
+        }
+    }
+
+    ESP_LOGI(AHT_TAG, "AHT20 initialized at 0x38");
+}
+
+// Citire individuala umiditate
+esp_err_t AHT20_Read(float *humidity)
+{
+    if (humidity == nullptr)
+        return ESP_ERR_INVALID_ARG;
+
+    // Comanda de declansare a masurarii
+    uint8_t measure_cmd[3] = {0xAC, 0x33, 0x00};
+
+    esp_err_t err = i2c_master_transmit(
+        aht_dev,
+        measure_cmd,
+        sizeof(measure_cmd),
+        AHT20_I2C_TIMEOUT_MS
+    );
+
+    if (err != ESP_OK)
+        return err;
+
+    // Asteptam finalizarea conversiei
+    vTaskDelay(pdMS_TO_TICKS(AHT20_CONVERSION_MS));
+
+    uint8_t data[7] = {};
+
+    err = i2c_master_receive(
+        aht_dev,
+        data,
+        sizeof(data),
+        AHT20_I2C_TIMEOUT_MS
+    );
+
+    if (err != ESP_OK)
+        return err;
+
+    // Verificam bitul BUSY
+    if (data[0] & 0x80)
+        return ESP_ERR_INVALID_STATE;
+
+    // Verificam CRC-ul celor 6 octeti de date
+    if (AHT20_CRC8(data, 6) != data[6])
+        return ESP_ERR_INVALID_RESPONSE;
+
+    // Extragem valoarea bruta pe 20 biti
+    uint32_t raw_humidity =
+        (static_cast<uint32_t>(data[1]) << 12) |
+        (static_cast<uint32_t>(data[2]) << 4) |
+        (static_cast<uint32_t>(data[3]) >> 4);
+
+    // Conversie in umiditate relativa (%RH)
+    *humidity = static_cast<float>(
+        (raw_humidity * 100.0) / 1048576.0
+    );
+
+    return ESP_OK;
+}
+
+// Media aritmetica a 16 masuratori
+esp_err_t AHT20_ReadAverage(float *humidity)
+{
+    if (humidity == nullptr)
+        return ESP_ERR_INVALID_ARG;
+
+    double sum_H = 0.0;
+
+    for (int i = 0; i < AHT20_SAMPLES; i++)
+    {
+        float h = 0.0f;
+
+        esp_err_t err = AHT20_Read(&h);
+
+        if (err != ESP_OK)
+            return err;
+
+        sum_H += h;
+    }
+
+    *humidity = static_cast<float>(
+        sum_H / AHT20_SAMPLES
+    );
+
+    return ESP_OK;
+}
+
+// FreeRTOS task pentru umiditate
+void AHT20_Task(void *pvParameters)
+{
+    (void)pvParameters;
+
+    while (true)
+    {
+        float humidity = 0.0f;
+
+        esp_err_t err = AHT20_ReadAverage(&humidity);
+
+        if (err == ESP_OK)
+        {
+            ESP_LOGI(
+                AHT_TAG,
+                "Humidity: %.2f %%RH",
+                humidity
+            );
+        }
+        else
+        {
+            ESP_LOGE(
+                AHT_TAG,
+                "Read failed: %s",
+                esp_err_to_name(err)
+            );
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(AHT20_INTERVAL_MS));
+    }
+}
+
+// ######################################################## //
+//                      AHT20-READING                       //
+// ######################################################## //
+
 // Main entry point
 extern "C" void app_main(void)
 {
     LDR_Init();
     BMP280_Init();
+    AHT20_Init();
+    SR602_Init();
 
     vTaskDelay(pdMS_TO_TICKS(3000));
     //xTaskCreate(LDR_Task,"LDR_Task", LDR_TASK_STACK, nullptr, LDR_TASK_PRIORITY, nullptr);
     //xTaskCreate(BMP280_Task, "BMP280_Task", 4096, nullptr, BMP280_PRIORITY, nullptr);
+    xTaskCreate(AHT20_Task, "AHT20_Task", AHT20_STACK, nullptr, AHT20_PRIORITY, nullptr);
+    xTaskCreate(SR602_Task, "SR602_Task", SR602_STACK, nullptr, SR602_PRIORITY, nullptr);
 
 }
