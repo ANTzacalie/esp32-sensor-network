@@ -512,70 +512,85 @@ uint8_t AHT20_CRC8(const uint8_t *data, size_t length)
 }
 
 // Initializare AHT20 pe aceeasi magistrala cu BMP280
-void AHT20_Init(void)
+
+esp_err_t AHT20_Init(void)
 {
-    // Magistrala bmp_bus trebuie deja initializata
     if (bmp_bus == nullptr)
+        return ESP_ERR_INVALID_STATE;
+
+    // Verificam daca AHT20 raspunde la 0x38
+    esp_err_t err = i2c_master_probe(
+        bmp_bus, AHT20_ADDR, AHT20_I2C_TIMEOUT_MS
+    );
+
+    if (err != ESP_OK)
     {
-        ESP_LOGE(AHT_TAG, "I2C bus not initialized");
-        abort();
+        ESP_LOGE(AHT_TAG,
+                 "AHT20 not detected at 0x38: %s",
+                 esp_err_to_name(err));
+        return err;
     }
 
+    // Adaugam AHT20 la magistrala existenta
     i2c_device_config_t dev_cfg = {};
-
     dev_cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
     dev_cfg.device_address = AHT20_ADDR;
-    dev_cfg.scl_speed_hz = BMP280_I2C_FREQ_HZ;
+    dev_cfg.scl_speed_hz = AHT20_I2C_FREQ_HZ;
 
-    ESP_ERROR_CHECK(i2c_master_bus_add_device(
-        bmp_bus,
-        &dev_cfg,
-        &aht_dev
-    ));
+    err = i2c_master_bus_add_device(
+        bmp_bus, &dev_cfg, &aht_dev
+    );
+
+    if (err != ESP_OK)
+        return err;
 
     // Timp de stabilizare dupa alimentare
-    vTaskDelay(pdMS_TO_TICKS(100));
+    vTaskDelay(pdMS_TO_TICKS(150));
 
-    // Citim registrul de status
     uint8_t status = 0;
+    err = AHT20_ReadStatus(&status);
 
-    ESP_ERROR_CHECK(i2c_master_receive(
-        aht_dev,
-        &status,
-        1,
-        AHT20_I2C_TIMEOUT_MS
-    ));
-
-    // Verificam bitul de calibrare (bit 3)
-    if ((status & 0x08) == 0)
+    if (err == ESP_OK &&
+        (status & AHT20_STATUS_CALIBRATED) == 0)
     {
-        uint8_t init_cmd[3] = {0xBE, 0x08, 0x00};
+        const uint8_t init_cmd[3] = {
+            0xBE, 0x08, 0x00
+        };
 
-        ESP_ERROR_CHECK(i2c_master_transmit(
-            aht_dev,
-            init_cmd,
-            sizeof(init_cmd),
+        err = i2c_master_transmit(
+            aht_dev, init_cmd, sizeof(init_cmd),
             AHT20_I2C_TIMEOUT_MS
-        ));
+        );
 
-        vTaskDelay(pdMS_TO_TICKS(20));
-
-        ESP_ERROR_CHECK(i2c_master_receive(
-            aht_dev,
-            &status,
-            1,
-            AHT20_I2C_TIMEOUT_MS
-        ));
-
-        if ((status & 0x08) == 0)
+        if (err == ESP_OK)
         {
-            ESP_LOGE(AHT_TAG, "Calibration not enabled");
-            abort();
+            vTaskDelay(pdMS_TO_TICKS(20));
+            err = AHT20_ReadStatus(&status);
         }
     }
 
+    if (err == ESP_OK &&
+        (status & AHT20_STATUS_CALIBRATED) == 0)
+    {
+        err = ESP_ERR_INVALID_STATE;
+    }
+
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(AHT_TAG,
+                 "AHT20 initialization failed: %s",
+                 esp_err_to_name(err));
+
+        i2c_master_bus_rm_device(aht_dev);
+        aht_dev = nullptr;
+        return err;
+    }
+
     ESP_LOGI(AHT_TAG, "AHT20 initialized at 0x38");
+
+    return ESP_OK;
 }
+
 
 // Citire individuala umiditate
 esp_err_t AHT20_Read(float *humidity)
@@ -696,19 +711,58 @@ void AHT20_Task(void *pvParameters)
 //                      AHT20-READING                       //
 // ######################################################## //
 
+
+void I2C_CheckSensors(void)
+{
+    constexpr int TIMEOUT_MS = 1000;
+
+    const esp_err_t bmp_status = i2c_master_probe(
+        bmp_bus, 0x76, TIMEOUT_MS
+    );
+
+    const esp_err_t aht_status = i2c_master_probe(
+        bmp_bus, 0x38, TIMEOUT_MS
+    );
+
+    ESP_LOGI("I2C", "BMP280 (0x76): %s",
+             esp_err_to_name(bmp_status));
+
+    ESP_LOGI("I2C", "AHT20  (0x38): %s",
+             esp_err_to_name(aht_status));
+}
+
+
+
 // Main entry point
 extern "C" void app_main(void)
 {
-    
+
     LDR_Init();
     BMP280_Init();
-    AHT20_Init();
+
+    I2C_CheckSensors();
+
+    esp_err_t aht_status = AHT20_Init();
     SR602_Init();
 
     vTaskDelay(pdMS_TO_TICKS(3000));
-    //xTaskCreate(LDR_Task,"LDR_Task", LDR_TASK_STACK, nullptr, LDR_TASK_PRIORITY, nullptr);
-    //xTaskCreate(BMP280_Task, "BMP280_Task", 4096, nullptr, BMP280_PRIORITY, nullptr);
-    xTaskCreate(AHT20_Task, "AHT20_Task", AHT20_STACK, nullptr, AHT20_PRIORITY, nullptr);
+
+    // xTaskCreate(LDR_Task, "LDR_Task", LDR_TASK_STACK, nullptr, LDR_TASK_PRIORITY, nullptr);
+    // xTaskCreate(BMP280_Task, "BMP280_Task", 4096, nullptr, BMP280_PRIORITY, nullptr);
+
+    // Pornim AHT20 doar daca a fost initializat
+    if (aht_status == ESP_OK)
+    {
+        xTaskCreate(
+            AHT20_Task,
+            "AHT20_Task",
+            AHT20_STACK,
+            nullptr,
+            AHT20_PRIORITY,
+            nullptr
+        );
+    }
+
     xTaskCreate(SR602_Task, "SR602_Task", SR602_STACK, nullptr, SR602_PRIORITY, nullptr);
 
 }
