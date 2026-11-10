@@ -514,6 +514,24 @@ uint8_t AHT20_CRC8(const uint8_t *data, size_t length)
     return crc;
 }
 
+
+esp_err_t AHT20_ReadStatus(uint8_t *status)
+{
+    if (status == nullptr)
+        return ESP_ERR_INVALID_ARG;
+
+    if (aht_dev == nullptr)
+        return ESP_ERR_INVALID_STATE;
+
+    // Citim octetul de status al AHT20
+    return i2c_master_receive(
+        aht_dev,
+        status,
+        1,
+        AHT20_I2C_TIMEOUT_MS
+    );
+}
+
 // Initializare AHT20 pe aceeasi magistrala cu BMP280
 
 esp_err_t AHT20_Init(void)
