@@ -721,6 +721,15 @@ void AHT20_Task(void *pvParameters)
     }
 }
 
+/*
+    - Citirile senzorului BMP280 sunt la fiecare 30 secunde, !!! INITIAL !!!
+    - Citirile SR602 sunt constante la o rata de 100ms.
+    - Citirile AHT20 sunt la fiecare 120 secunde, !!! INITIAL !!!
+    - Citirile Fotorezistorului Typ5537 sunt constante la o rata de 1 ora.
+    * PENTRU A MENTINE O FUNCTIONARE CAT MAI INDELUNGATA PE BATERIE, SENZORII AHT20 SI BMP280 VA TREBUI SA FIE PUSI IN SLEEP, dar pentru aceasta aplicatie ei sunt senzori stationari. *
+
+*/
+
 // Main entry point
 extern "C" void app_main(void)
 {
