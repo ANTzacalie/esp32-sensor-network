@@ -89,12 +89,6 @@ void LDR_Task(void *pvParameters)
     }
 }
 
-// ######################################################## //
-//                      LDR-READING                         //
-// ######################################################## //
-
-
-
 #include <cstdint>
 #include <cstddef>
 #include <cstdlib>
@@ -103,7 +97,7 @@ void LDR_Task(void *pvParameters)
 // BMP280 configuration;
 constexpr gpio_num_t BMP280_SCL = GPIO_NUM_21;
 constexpr gpio_num_t BMP280_SDA = GPIO_NUM_22;
-constexpr uint16_t BMP280_ADDR = 0x76;
+constexpr uint16_t BMP280_ADDR = 0x77; // IF SD0 IS AT GND, ADDR = 0x76 , IF AT 3.3V ADDR = 0x77;
 
 constexpr int BMP280_SAMPLES = 16;
 constexpr uint32_t BMP280_INTERVAL_MS = 1000;
@@ -437,14 +431,14 @@ void SR602_Task(void *pvParameters)
 {
     (void)pvParameters;
 
-    int previous_state = 0;
+    int previous_state = -1;
 
     while (true)
     {
         int current_state = SR602_Read();
 
         // Afisam doar la schimbarea starii
-        if (1)
+        if (current_state != previous_state)
         {
             if (current_state == 1)
             {
@@ -467,10 +461,6 @@ void SR602_Task(void *pvParameters)
         vTaskDelay(pdMS_TO_TICKS(SR602_INTERVAL_MS));
     }
 }
-
-// ######################################################## //
-//                      SR602-READING                       //
-// ######################################################## //
 
 
  // ######################################################## //
@@ -728,13 +718,6 @@ void AHT20_Task(void *pvParameters)
     }
 }
 
-// ######################################################## //
-//                      AHT20-READING                       //
-// ######################################################## //
-
-
-
-
 // Main entry point
 extern "C" void app_main(void)
 {
@@ -742,20 +725,18 @@ extern "C" void app_main(void)
     //LDR_Init();
     BMP280_Init();
 
-    //I2C_CheckSensors();
-
-    //AHT20_Init();
-    //SR602_Init();
+    // Se verifica daca si exista AHT20 la acest nod;
+    AHT20_Init(); 
+    // Se verifica daca si exista SR602 la acest nod;
+    SR602_Init();  
 
     vTaskDelay(pdMS_TO_TICKS(3000));
 
-    // xTaskCreate(LDR_Task, "LDR_Task", LDR_TASK_STACK, nullptr, LDR_TASK_PRIORITY, nullptr);
-    xTaskCreate(BMP280_Task, "BMP280_Task", 4096, nullptr, BMP280_PRIORITY, nullptr);
-
     // Pornim AHT20 doar daca a fost initializat
-    
-    //xTaskCreate(AHT20_Task,"AHT20_Task",AHT20_STACK,nullptr,AHT20_PRIORITY,nullptr);
+    xTaskCreate(AHT20_Task,"AHT20_Task",AHT20_STACK,nullptr,AHT20_PRIORITY,nullptr);
 
+    // xTaskCreate(LDR_Task, "LDR_Task", LDR_TASK_STACK, nullptr, LDR_TASK_PRIORITY, nullptr);
+    // xTaskCreate(BMP280_Task, "BMP280_Task", 4096, nullptr, BMP280_PRIORITY, nullptr);
     //xTaskCreate(SR602_Task, "SR602_Task", SR602_STACK, nullptr, SR602_PRIORITY, nullptr);
 
 }
