@@ -20,7 +20,7 @@ const constexpr uint8_t HAS_SR602 = true;
 
 constexpr adc_channel_t LDR_CHANNEL = ADC_CHANNEL_7; // GPIO35
 constexpr int ADC_SAMPLES_LDR = 16;
-constexpr uint32_t READ_INTERVAL = 1000; // ms
+constexpr uint32_t READ_INTERVAL = 3600000; // ms
 
 const constexpr UBaseType_t LDR_TASK_PRIORITY = 5;
 const constexpr uint16_t LDR_TASK_STACK = 4096;
@@ -105,7 +105,7 @@ constexpr gpio_num_t BMP280_SDA = GPIO_NUM_22;
 constexpr uint16_t BMP280_ADDR = 0x77; // IF SD0 IS AT GND, ADDR = 0x76 , IF AT 3.3V ADDR = 0x77;
 
 constexpr int BMP280_SAMPLES = 16;
-constexpr uint32_t BMP280_INTERVAL_MS = 1000;
+constexpr uint32_t BMP280_INTERVAL_MS = 30000;
 constexpr UBaseType_t BMP280_PRIORITY = 15;
 constexpr uint32_t BMP280_STACK = 4096;
 
@@ -473,7 +473,7 @@ void SR602_Task(void *pvParameters)
 constexpr uint16_t AHT20_ADDR = 0x38;
 constexpr int AHT20_SAMPLES = 16;
 
-constexpr uint32_t AHT20_INTERVAL_MS = 1000;
+constexpr uint32_t AHT20_INTERVAL_MS = 120000;
 constexpr uint32_t AHT20_CONVERSION_MS = 85;
 constexpr uint32_t AHT20_I2C_TIMEOUT_MS = 1000;
 
@@ -723,11 +723,10 @@ void AHT20_Task(void *pvParameters)
 
 /*
     - Citirile senzorului BMP280 sunt la fiecare 30 secunde, !!! INITIAL !!!
-    - Citirile SR602 sunt constante la o rata de 100ms.
+    - Citirile SR602 sunt constante la o rata de 1000ms.
     - Citirile AHT20 sunt la fiecare 120 secunde, !!! INITIAL !!!
     - Citirile Fotorezistorului Typ5537 sunt constante la o rata de 1 ora.
-    * PENTRU A MENTINE O FUNCTIONARE CAT MAI INDELUNGATA PE BATERIE, SENZORII AHT20 SI BMP280 VA TREBUI SA FIE PUSI IN SLEEP, dar pentru aceasta aplicatie ei sunt senzori stationari. *
-
+    * PENTRU A MENTINE O FUNCTIONARE CAT MAI INDELUNGATA PE BATERIE, SENZORII AHT20 SI BMP280 VA TREBUI SA FIE PUSI IN SLEEP, dar pentru aceasta aplicatie nu este ncecesar. *
 */
 
 // Main entry point
@@ -746,10 +745,7 @@ extern "C" void app_main(void)
     vTaskDelay(pdMS_TO_TICKS(3000));
 
     if(check_err == 0) {
-
-         // Pornim AHT20 doar daca a fost initializat
          xTaskCreate(AHT20_Task,"AHT20_Task",AHT20_STACK,nullptr,AHT20_PRIORITY,nullptr);
-
     }
 
     if(HAS_SR602) {
