@@ -7,6 +7,16 @@
 #include "esp_log.h"
 #include "esp_err.h"
 #include "esp_adc/adc_oneshot.h"
+#include <cstddef>
+#include <cstdlib>
+#include "driver/i2c_master.h"
+#include "driver/gpio.h"
+
+
+/*
+    LA FLASH ACESTA VARIABILA SA VA MODIFICA PENTRU NODUL CU SR602(TRUE) / CEL FARA SR602(FALSE);
+*/
+const constexpr uint8_t HAS_SR602 = true; 
 
 constexpr adc_channel_t LDR_CHANNEL = ADC_CHANNEL_7; // GPIO35
 constexpr int ADC_SAMPLES_LDR = 16;
@@ -88,11 +98,6 @@ void LDR_Task(void *pvParameters)
         vTaskDelay(pdMS_TO_TICKS(READ_INTERVAL));
     }
 }
-
-#include <cstdint>
-#include <cstddef>
-#include <cstdlib>
-#include "driver/i2c_master.h"
 
 // BMP280 configuration;
 constexpr gpio_num_t BMP280_SCL = GPIO_NUM_21;
@@ -393,8 +398,6 @@ void BMP280_Task(void *pvParameters)
 // ######################################################## //
 //                      SR602-READING                       //
 // ######################################################## //
-
-#include "driver/gpio.h"
 
 constexpr gpio_num_t SR602_PIN = GPIO_NUM_27;
 
@@ -722,21 +725,29 @@ void AHT20_Task(void *pvParameters)
 extern "C" void app_main(void)
 {
 
-    //LDR_Init();
+    LDR_Init();
     BMP280_Init();
 
     // Se verifica daca si exista AHT20 la acest nod;
-    AHT20_Init(); 
+    esp_err_t check_err = AHT20_Init(); 
+    
     // Se verifica daca si exista SR602 la acest nod;
     SR602_Init();  
 
     vTaskDelay(pdMS_TO_TICKS(3000));
 
-    // Pornim AHT20 doar daca a fost initializat
-    xTaskCreate(AHT20_Task,"AHT20_Task",AHT20_STACK,nullptr,AHT20_PRIORITY,nullptr);
+    if(check_err == 0) {
 
-    // xTaskCreate(LDR_Task, "LDR_Task", LDR_TASK_STACK, nullptr, LDR_TASK_PRIORITY, nullptr);
-    // xTaskCreate(BMP280_Task, "BMP280_Task", 4096, nullptr, BMP280_PRIORITY, nullptr);
-    //xTaskCreate(SR602_Task, "SR602_Task", SR602_STACK, nullptr, SR602_PRIORITY, nullptr);
+         // Pornim AHT20 doar daca a fost initializat
+         xTaskCreate(AHT20_Task,"AHT20_Task",AHT20_STACK,nullptr,AHT20_PRIORITY,nullptr);
+
+    }
+
+    if(HAS_SR602) {
+        xTaskCreate(SR602_Task, "SR602_Task", SR602_STACK, nullptr, SR602_PRIORITY, nullptr);
+    }
+
+    xTaskCreate(LDR_Task, "LDR_Task", LDR_TASK_STACK, nullptr, LDR_TASK_PRIORITY, nullptr);
+    xTaskCreate(BMP280_Task, "BMP280_Task", 4096, nullptr, BMP280_PRIORITY, nullptr);
 
 }
