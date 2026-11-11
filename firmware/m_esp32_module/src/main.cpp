@@ -1,16 +1,12 @@
+
 #include <stdint.h>
-#include <cstddef>
-#include <cstdlib>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 #include "esp_log.h"
 #include "esp_err.h"
-#include "esp_timer.h"            // MODIFICAT: pentru durata impulsului SR602
 #include "esp_adc/adc_oneshot.h"
-#include "driver/gpio.h"
-#include "driver/i2c_master.h"
 
 constexpr adc_channel_t LDR_CHANNEL = ADC_CHANNEL_7; // GPIO35
 constexpr int ADC_SAMPLES_LDR = 16;
@@ -98,11 +94,16 @@ void LDR_Task(void *pvParameters)
 // ######################################################## //
 
 
+
+#include <cstdint>
+#include <cstddef>
+#include <cstdlib>
+#include "driver/i2c_master.h"
+
 // BMP280 configuration;
 constexpr gpio_num_t BMP280_SCL = GPIO_NUM_21;
 constexpr gpio_num_t BMP280_SDA = GPIO_NUM_22;
-constexpr uint16_t BMP280_ADDR = 0x76;       // SDO la GND
-constexpr uint16_t BMP280_ADDR_ALT = 0x77;   // MODIFICAT: SDO la VCC, incercam si asta
+constexpr uint16_t BMP280_ADDR = 0x76;
 
 constexpr int BMP280_SAMPLES = 16;
 constexpr uint32_t BMP280_INTERVAL_MS = 1000;
@@ -176,8 +177,8 @@ int16_t BMP280_S16(const uint8_t *p)
     return static_cast<int16_t>(BMP280_U16(p));
 }
 
-// MODIFICAT: magistrala I2C se creeaza separat, ca sa mearga AHT20 si fara BMP280
-esp_err_t I2C_BusInit(void)
+// Initializare I2C si a BMP280;
+void BMP280_Init(void)
 {
     i2c_master_bus_config_t bus_cfg = {};
 
@@ -186,89 +187,61 @@ esp_err_t I2C_BusInit(void)
     bus_cfg.scl_io_num = BMP280_SCL;
     bus_cfg.clk_source = I2C_CLK_SRC_DEFAULT;
     bus_cfg.glitch_ignore_cnt = 7;
-    bus_cfg.flags.enable_internal_pullup = true;   // MODIFICAT: pull-up intern, ajuta daca modulul nu are rezistente
 
-    return i2c_new_master_bus(&bus_cfg, &bmp_bus);
-}
+    ESP_ERROR_CHECK(i2c_new_master_bus(
+        &bus_cfg, &bmp_bus
+    ));
 
-// MODIFICAT: scaneaza magistrala si afiseaza toate adresele care raspund
-void I2C_Scan(void)
-{
-    int found = 0;
+    i2c_device_config_t dev_cfg = {};
 
-    for (uint16_t addr = 0x08; addr < 0x78; addr++)
-    {
-        if (i2c_master_probe(bmp_bus, addr, 50) == ESP_OK)
-        {
-            ESP_LOGI("I2C", "Device found at 0x%02X", addr);
-            found++;
-        }
+    dev_cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+    dev_cfg.device_address = BMP280_ADDR;
+    dev_cfg.scl_speed_hz = BMP280_I2C_FREQ_HZ;
+
+    ESP_ERROR_CHECK(i2c_master_bus_add_device(
+        bmp_bus, &dev_cfg, &bmp_dev
+    ));
+
+    // Verificam senzor;
+    uint8_t id = 0;
+
+    ESP_ERROR_CHECK(BMP280_ReadReg(
+        BMP280_REG_ID, &id, 1
+    ));
+
+    if (id != BMP280_CHIP_ID) {
+        ESP_LOGE(BMP_TAG,
+                 "Invalid sensor ID: 0x%02X", id);
+        abort();
     }
 
-    if (found == 0)
-        ESP_LOGW("I2C", "No devices found (verifica SDA/SCL, alimentarea si GND)");
-}
+    // Citim si calibram registrele;
+    uint8_t b[24] = {};
 
-// Initializare BMP280 (nu mai opreste placa daca senzorul lipseste)
-esp_err_t BMP280_Init(void)
-{
-    const uint16_t addresses[2] = {BMP280_ADDR, BMP280_ADDR_ALT};
+    ESP_ERROR_CHECK(BMP280_ReadReg(
+        BMP280_REG_CALIB, b, sizeof(b)
+    ));
 
-    for (uint16_t addr : addresses)
-    {
-        i2c_device_config_t dev_cfg = {};
+    cal.T1 = BMP280_U16(&b[0]);
+    cal.T2 = BMP280_S16(&b[2]);
+    cal.T3 = BMP280_S16(&b[4]);
 
-        dev_cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
-        dev_cfg.device_address = addr;
-        dev_cfg.scl_speed_hz = BMP280_I2C_FREQ_HZ;
+    cal.P1 = BMP280_U16(&b[6]);
+    cal.P2 = BMP280_S16(&b[8]);
+    cal.P3 = BMP280_S16(&b[10]);
+    cal.P4 = BMP280_S16(&b[12]);
+    cal.P5 = BMP280_S16(&b[14]);
+    cal.P6 = BMP280_S16(&b[16]);
+    cal.P7 = BMP280_S16(&b[18]);
+    cal.P8 = BMP280_S16(&b[20]);
+    cal.P9 = BMP280_S16(&b[22]);
 
-        esp_err_t err = i2c_master_bus_add_device(bmp_bus, &dev_cfg, &bmp_dev);
-
-        if (err != ESP_OK)
-            continue;
-
-        // Verificam senzor;
-        uint8_t id = 0;
-        err = BMP280_ReadReg(BMP280_REG_ID, &id, 1);
-
-        if (err == ESP_OK && id == BMP280_CHIP_ID)
-        {
-            // Citim si calibram registrele;
-            uint8_t b[24] = {};
-
-            err = BMP280_ReadReg(BMP280_REG_CALIB, b, sizeof(b));
-
-            if (err == ESP_OK)
-            {
-                cal.T1 = BMP280_U16(&b[0]);
-                cal.T2 = BMP280_S16(&b[2]);
-                cal.T3 = BMP280_S16(&b[4]);
-
-                cal.P1 = BMP280_U16(&b[6]);
-                cal.P2 = BMP280_S16(&b[8]);
-                cal.P3 = BMP280_S16(&b[10]);
-                cal.P4 = BMP280_S16(&b[12]);
-                cal.P5 = BMP280_S16(&b[14]);
-                cal.P6 = BMP280_S16(&b[16]);
-                cal.P7 = BMP280_S16(&b[18]);
-                cal.P8 = BMP280_S16(&b[20]);
-                cal.P9 = BMP280_S16(&b[22]);
-
-                if (cal.P1 != 0)
-                {
-                    ESP_LOGI(BMP_TAG, "BMP280 initialized at 0x%02X", addr);
-                    return ESP_OK;
-                }
-            }
-        }
-
-        // Nu e el la adresa asta, scoatem dispozitivul si incercam urmatoarea
-        i2c_master_bus_rm_device(bmp_dev);
-        bmp_dev = nullptr;
+    if (cal.P1 == 0) {
+        ESP_LOGE(BMP_TAG, "Invalid calibration");
+        abort();
     }
 
-    ESP_LOGE(BMP_TAG, "BMP280 not found at 0x76 or 0x77");
-    return ESP_ERR_NOT_FOUND;
+    ESP_LOGI(BMP_TAG, "BMP280 initialized on SDA=22 SCL=21");
 }
 
 // Read one compensated measurement;
@@ -315,7 +288,7 @@ esp_err_t BMP280_Read(float *temperature, float *pressure)
         return ESP_ERR_INVALID_RESPONSE;
 
     // Compensatie a temperaturi, conofrm Bosch;
-    double v1 = (adc_T / 16384.0 - cal.T1 / 1024.0) * cal.T2;
+    double v1 =(adc_T / 16384.0 - cal.T1 / 1024.0) * cal.T2;
 
     double v2 = (adc_T / 131072.0 - cal.T1 / 8192.0);
 
@@ -387,7 +360,7 @@ esp_err_t BMP280_ReadAverage(float *temperature, float *pressure)
     return ESP_OK;
 }
 
-// FreeRTOS task, afisaza temperatura si presiunea mediata, si raporteaza eroare daca una exista;
+// FreeRTOS task, afisaza temperatura si umiditatea mediata, si raporteaza eroare daca una exista;
 void BMP280_Task(void *pvParameters)
 {
     (void)pvParameters;
@@ -427,17 +400,13 @@ void BMP280_Task(void *pvParameters)
 //                      SR602-READING                       //
 // ######################################################## //
 
+#include "driver/gpio.h"
+
 constexpr gpio_num_t SR602_PIN = GPIO_NUM_27;
 
-<<<<<<< HEAD
 constexpr uint32_t SR602_INTERVAL_MS = 1000;
 constexpr UBaseType_t SR602_PRIORITY = 10;
 constexpr uint32_t SR602_STACK = 2048;
-=======
-constexpr uint32_t SR602_INTERVAL_MS = 10;      // MODIFICAT: era 100, acum rezolutie de +-10 ms pe durata impulsului
-constexpr UBaseType_t SR602_PRIORITY = 8;
-constexpr uint32_t SR602_STACK = 4096;          // MODIFICAT: era 2048, prea putin pentru ESP_LOGI
->>>>>>> 9b35556ab7cf695798be51dd7dd3001764c8320a
 
 static const char *SR602_TAG = "SR602";
 
@@ -464,17 +433,11 @@ int SR602_Read(void)
 }
 
 // FreeRTOS task pentru detectare miscare
-// MODIFICAT: masoara si cat timp ramane iesirea pe HIGH (timpul de mentinere)
 void SR602_Task(void *pvParameters)
 {
     (void)pvParameters;
 
-<<<<<<< HEAD
     int previous_state = 0;
-=======
-    int previous_state = -1;
-    int64_t rise_time_us = 0;
->>>>>>> 9b35556ab7cf695798be51dd7dd3001764c8320a
 
     while (true)
     {
@@ -483,27 +446,11 @@ void SR602_Task(void *pvParameters)
         // Afisam doar la schimbarea starii
         if (1)
         {
-            int64_t now_us = esp_timer_get_time();
-
             if (current_state == 1)
             {
-                rise_time_us = now_us;
-
                 ESP_LOGI(
                     SR602_TAG,
                     "Motion detected!"
-                );
-            }
-            else if (previous_state == 1)
-            {
-                // Front descrescator: durata impulsului HIGH
-                long long high_ms =
-                    static_cast<long long>((now_us - rise_time_us) / 1000);
-
-                ESP_LOGI(
-                    SR602_TAG,
-                    "No motion | HIGH duration: %lld ms",
-                    high_ms
                 );
             }
             else
@@ -526,9 +473,9 @@ void SR602_Task(void *pvParameters)
 // ######################################################## //
 
 
-// ######################################################## //
-//                      AHT20-READING                       //
-// ######################################################## //
+ // ######################################################## //
+ //                      AHT20-READING                       //
+ // ######################################################## //
 
 constexpr uint16_t AHT20_ADDR = 0x38;
 constexpr int AHT20_SAMPLES = 16;
@@ -667,10 +614,9 @@ esp_err_t AHT20_Init(void)
 
 
 // Citire individuala umiditate
-// MODIFICAT: pastram doar 12 biti din cei 20 (raw12 = raw20 >> 8), ca in document
-esp_err_t AHT20_Read(float *humidity, uint16_t *raw12)
+esp_err_t AHT20_Read(float *humidity)
 {
-    if (humidity == nullptr || raw12 == nullptr)
+    if (humidity == nullptr)
         return ESP_ERR_INVALID_ARG;
 
     // Comanda de declansare a masurarii
@@ -715,47 +661,36 @@ esp_err_t AHT20_Read(float *humidity, uint16_t *raw12)
         (static_cast<uint32_t>(data[2]) << 4) |
         (static_cast<uint32_t>(data[3]) >> 4);
 
-    // Pastram primii 12 biti
-    *raw12 = static_cast<uint16_t>(raw_humidity >> 8);
-
-    // Conversie in umiditate relativa (%RH), 1 LSB = 100 / 4096 = 0,0244 %RH
+    // Conversie in umiditate relativa (%RH)
     *humidity = static_cast<float>(
-        (*raw12 * 100.0) / 4096.0
+        (raw_humidity * 100.0) / 1048576.0
     );
 
     return ESP_OK;
 }
 
 // Media aritmetica a 16 masuratori
-// MODIFICAT: returneaza si media valorii RAW12
-esp_err_t AHT20_ReadAverage(float *humidity, float *raw12_avg)
+esp_err_t AHT20_ReadAverage(float *humidity)
 {
-    if (humidity == nullptr || raw12_avg == nullptr)
+    if (humidity == nullptr)
         return ESP_ERR_INVALID_ARG;
 
     double sum_H = 0.0;
-    double sum_raw = 0.0;
 
     for (int i = 0; i < AHT20_SAMPLES; i++)
     {
         float h = 0.0f;
-        uint16_t raw = 0;
 
-        esp_err_t err = AHT20_Read(&h, &raw);
+        esp_err_t err = AHT20_Read(&h);
 
         if (err != ESP_OK)
             return err;
 
         sum_H += h;
-        sum_raw += raw;
     }
 
     *humidity = static_cast<float>(
         sum_H / AHT20_SAMPLES
-    );
-
-    *raw12_avg = static_cast<float>(
-        sum_raw / AHT20_SAMPLES
     );
 
     return ESP_OK;
@@ -769,18 +704,15 @@ void AHT20_Task(void *pvParameters)
     while (true)
     {
         float humidity = 0.0f;
-        float raw12 = 0.0f;
 
-        esp_err_t err = AHT20_ReadAverage(&humidity, &raw12);
+        esp_err_t err = AHT20_ReadAverage(&humidity);
 
         if (err == ESP_OK)
         {
-            // MODIFICAT: formatul cerut in document
             ESP_LOGI(
                 AHT_TAG,
-                "Umiditate: %.2f %%RH | RAW12: %.1f / 4096",
-                humidity,
-                raw12
+                "Humidity: %.2f %%RH",
+                humidity
             );
         }
         else
@@ -801,10 +733,11 @@ void AHT20_Task(void *pvParameters)
 // ######################################################## //
 
 
+
+
 // Main entry point
 extern "C" void app_main(void)
 {
-<<<<<<< HEAD
 
     //LDR_Init();
     BMP280_Init();
@@ -813,40 +746,16 @@ extern "C" void app_main(void)
 
     //AHT20_Init();
     //SR602_Init();
-=======
-    LDR_Init();
-
-    // MODIFICAT: magistrala I2C separata, apoi scan, apoi senzorii
-    ESP_ERROR_CHECK(I2C_BusInit());
-    I2C_Scan();
-
-    esp_err_t bmp_status = BMP280_Init();   // nu mai opreste placa daca lipseste
-    esp_err_t aht_status = AHT20_Init();
-    SR602_Init();
->>>>>>> 9b35556ab7cf695798be51dd7dd3001764c8320a
 
     vTaskDelay(pdMS_TO_TICKS(3000));
 
-    // Taskurile LDR si BMP280 raman oprite cat masori AHT20 si SR602,
-    // ca sa nu se amestece liniile in monitorul serial.
     // xTaskCreate(LDR_Task, "LDR_Task", LDR_TASK_STACK, nullptr, LDR_TASK_PRIORITY, nullptr);
-<<<<<<< HEAD
     xTaskCreate(BMP280_Task, "BMP280_Task", 4096, nullptr, BMP280_PRIORITY, nullptr);
-=======
-    // if (bmp_status == ESP_OK)
-    //     xTaskCreate(BMP280_Task, "BMP280_Task", BMP280_STACK, nullptr, BMP280_PRIORITY, nullptr);
-    (void)bmp_status;
->>>>>>> 9b35556ab7cf695798be51dd7dd3001764c8320a
 
     // Pornim AHT20 doar daca a fost initializat
     
     //xTaskCreate(AHT20_Task,"AHT20_Task",AHT20_STACK,nullptr,AHT20_PRIORITY,nullptr);
 
-<<<<<<< HEAD
     //xTaskCreate(SR602_Task, "SR602_Task", SR602_STACK, nullptr, SR602_PRIORITY, nullptr);
 
 }
-=======
-    xTaskCreate(SR602_Task, "SR602_Task", SR602_STACK, nullptr, SR602_PRIORITY, nullptr);
-}
->>>>>>> 9b35556ab7cf695798be51dd7dd3001764c8320a
