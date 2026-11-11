@@ -745,14 +745,14 @@ extern "C" void app_main(void)
     vTaskDelay(pdMS_TO_TICKS(3000));
 
     if(check_err == 0) {
-         xTaskCreate(AHT20_Task,"AHT20_Task",AHT20_STACK,nullptr,AHT20_PRIORITY,nullptr);
+         xTaskCreate(AHT20_Task,"AHT20_Task", AHT20_STACK, nullptr, AHT20_PRIORITY, nullptr);
     }
 
     if(HAS_SR602) {
         xTaskCreate(SR602_Task, "SR602_Task", SR602_STACK, nullptr, SR602_PRIORITY, nullptr);
     }
 
-    xTaskCreate(LDR_Task, "LDR_Task", LDR_TASK_STACK, nullptr, LDR_TASK_PRIORITY, nullptr);
-    xTaskCreate(BMP280_Task, "BMP280_Task", 4096, nullptr, BMP280_PRIORITY, nullptr);
+    xTaskCreate(LDR_Task,    "LDR_Task", LDR_TASK_STACK, nullptr, LDR_TASK_PRIORITY, nullptr);
+    xTaskCreate(BMP280_Task, "BMP280_Task", BMP280_STACK , nullptr, BMP280_PRIORITY, nullptr);
 
 }
