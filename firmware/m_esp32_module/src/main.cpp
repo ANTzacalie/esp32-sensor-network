@@ -404,8 +404,8 @@ void BMP280_Task(void *pvParameters)
 
 constexpr gpio_num_t SR602_PIN = GPIO_NUM_27;
 
-constexpr uint32_t SR602_INTERVAL_MS = 100;
-constexpr UBaseType_t SR602_PRIORITY = 8;
+constexpr uint32_t SR602_INTERVAL_MS = 1000;
+constexpr UBaseType_t SR602_PRIORITY = 10;
 constexpr uint32_t SR602_STACK = 2048;
 
 static const char *SR602_TAG = "SR602";
@@ -437,14 +437,14 @@ void SR602_Task(void *pvParameters)
 {
     (void)pvParameters;
 
-    int previous_state = -1;
+    int previous_state = 0;
 
     while (true)
     {
         int current_state = SR602_Read();
 
         // Afisam doar la schimbarea starii
-        if (current_state != previous_state)
+        if (1)
         {
             if (current_state == 1)
             {
@@ -758,32 +758,23 @@ void I2C_CheckSensors(void)
 extern "C" void app_main(void)
 {
 
-    LDR_Init();
+    //LDR_Init();
     BMP280_Init();
 
-    I2C_CheckSensors();
+    //I2C_CheckSensors();
 
-    esp_err_t aht_status = AHT20_Init();
-    SR602_Init();
+    //AHT20_Init();
+    //SR602_Init();
 
     vTaskDelay(pdMS_TO_TICKS(3000));
 
     // xTaskCreate(LDR_Task, "LDR_Task", LDR_TASK_STACK, nullptr, LDR_TASK_PRIORITY, nullptr);
-    // xTaskCreate(BMP280_Task, "BMP280_Task", 4096, nullptr, BMP280_PRIORITY, nullptr);
+    xTaskCreate(BMP280_Task, "BMP280_Task", 4096, nullptr, BMP280_PRIORITY, nullptr);
 
     // Pornim AHT20 doar daca a fost initializat
-    if (aht_status == ESP_OK)
-    {
-        xTaskCreate(
-            AHT20_Task,
-            "AHT20_Task",
-            AHT20_STACK,
-            nullptr,
-            AHT20_PRIORITY,
-            nullptr
-        );
-    }
+    
+    //xTaskCreate(AHT20_Task,"AHT20_Task",AHT20_STACK,nullptr,AHT20_PRIORITY,nullptr);
 
-    xTaskCreate(SR602_Task, "SR602_Task", SR602_STACK, nullptr, SR602_PRIORITY, nullptr);
+    //xTaskCreate(SR602_Task, "SR602_Task", SR602_STACK, nullptr, SR602_PRIORITY, nullptr);
 
 }
