@@ -20,7 +20,7 @@ const constexpr uint8_t HAS_SR602 = true;
 
 constexpr adc_channel_t LDR_CHANNEL = ADC_CHANNEL_7; // GPIO35
 constexpr int ADC_SAMPLES_LDR = 16;
-constexpr uint32_t READ_INTERVAL = 3600000; // ms
+constexpr uint32_t READ_INTERVAL = 3600;//3600000; // ms
 
 const constexpr UBaseType_t LDR_TASK_PRIORITY = 5;
 const constexpr uint16_t LDR_TASK_STACK = 4096;
@@ -105,7 +105,7 @@ constexpr gpio_num_t BMP280_SDA = GPIO_NUM_22;
 constexpr uint16_t BMP280_ADDR = 0x77; // IF SD0 IS AT GND, ADDR = 0x76 , IF AT 3.3V ADDR = 0x77;
 
 constexpr int BMP280_SAMPLES = 16;
-constexpr uint32_t BMP280_INTERVAL_MS = 30000;
+constexpr uint32_t BMP280_INTERVAL_MS = 2500;//30000;
 constexpr UBaseType_t BMP280_PRIORITY = 15;
 constexpr uint32_t BMP280_STACK = 4096;
 
@@ -401,7 +401,7 @@ void BMP280_Task(void *pvParameters)
 
 constexpr gpio_num_t SR602_PIN = GPIO_NUM_27;
 
-constexpr uint32_t SR602_INTERVAL_MS = 1000;
+constexpr uint32_t SR602_INTERVAL_MS = 100;//1000;
 constexpr UBaseType_t SR602_PRIORITY = 10;
 constexpr uint32_t SR602_STACK = 2048;
 
@@ -473,7 +473,7 @@ void SR602_Task(void *pvParameters)
 constexpr uint16_t AHT20_ADDR = 0x38;
 constexpr int AHT20_SAMPLES = 16;
 
-constexpr uint32_t AHT20_INTERVAL_MS = 120000;
+constexpr uint32_t AHT20_INTERVAL_MS = 100;//120000;
 constexpr uint32_t AHT20_CONVERSION_MS = 85;
 constexpr uint32_t AHT20_I2C_TIMEOUT_MS = 1000;
 
